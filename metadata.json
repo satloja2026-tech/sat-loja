@@ -1,0 +1,6 @@
+{
+  "name": "SAT LOJA",
+  "description": "Loja Virtual Profissional SAT LOJA - Tecnologia, Eletrônicos e Qualidade com Painel Administrativo, Importação ZIP e Checkout WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
