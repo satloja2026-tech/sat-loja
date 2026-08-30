@@ -1,4 +1,6 @@
-import { Product, Category, Banner, StoreSettings, SiteSectionsConfig, Order, AdminUser, CartItem, OrderStatus } from '../types';
+import { Product, Category, Banner, StoreSettings, SiteSectionsConfig, Order, AdminUser, CartItem, OrderStatus, PaymentSettings } from '../types';
+import { firestoreDb } from './firebase';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'sat_loja_products',
@@ -12,6 +14,94 @@ const STORAGE_KEYS = {
   ADMIN_AUTH: 'sat_loja_admin_auth',
 };
 
+// Safe Memory + LocalStorage Adapter (prevents iframe SecurityError / QuotaExceededError crashes)
+const memoryStorage: Record<string, string> = {};
+
+const safeStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const val = window.localStorage.getItem(key);
+        if (val !== null) return val;
+      }
+    } catch {
+      // Fallback to in-memory store
+    }
+    return memoryStorage[key] ?? null;
+  },
+  setItem: (key: string, value: string): boolean => {
+    try {
+      memoryStorage[key] = value;
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, value);
+        return true;
+      }
+    } catch {
+      // Storage restricted or quota exceeded, memory store remains updated
+    }
+    return true;
+  },
+  removeItem: (key: string): void => {
+    try {
+      delete memoryStorage[key];
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      // ignore
+    }
+  },
+  clear: (): void => {
+    try {
+      Object.keys(memoryStorage).forEach((k) => delete memoryStorage[k]);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.clear();
+      }
+    } catch {
+      // ignore
+    }
+  },
+};
+
+export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
+  enablePix: true,
+  pixKey: '82999999999',
+  pixKeyType: 'phone',
+  pixBeneficiary: 'SAT LOJA OFICIAL',
+  pixCity: 'Maceió',
+  pixDiscountPercent: 5,
+  pixInstructions: 'Pagamento instantâneo via Pix com confirmação imediata. Envie o comprovante pelo WhatsApp após finalizar o pedido para despacho expresso.',
+  pixQrCodeUrl: '',
+
+  enableCreditCard: true,
+  creditCardMaxInstallments: 12,
+  creditCardInterestFreeInstallments: 3,
+  creditCardInterestRate: 1.99,
+  creditCardMachineOnDelivery: true,
+  creditCardInstructions: 'Aceitamos Visa, Mastercard, Elo, Hipercard e Amex. Parcelamos em até 12x (até 3x sem juros). Levamos a maquininha na entrega ou geramos link seguro online.',
+
+  enableDebitCard: true,
+  debitCardMachineOnDelivery: true,
+  debitCardInstructions: 'Aceitamos os principais cartões de débito (Visa Débito, Mastercard Maestro e Elo Débito) na entrega.',
+
+  enableCash: true,
+  cashDiscountPercent: 5,
+  cashInstructions: 'Pagamento em dinheiro no ato da entrega. Informe no campo de observações se precisará de troco e para quanto.',
+
+  enableBoleto: false,
+  boletoDiscountPercent: 0,
+  boletoInstructions: 'O boleto bancário é gerado após confirmação com nosso atendente no WhatsApp. Prazo de compensação de 1 a 2 dias úteis.',
+
+  enablePaymentLink: true,
+  paymentLinkName: 'Link de Pagamento Online Seguro (Mercado Pago / PicPay)',
+  paymentLinkUrl: '',
+  paymentLinkInstructions: 'Enviaremos um link direto criptografado e seguro para você pagar com cartão de crédito, saldo ou parcelado.',
+
+  defaultPaymentMethod: 'pix',
+  showPaymentBadgesOnCards: true,
+  customPaymentNotes: 'Dúvidas sobre pagamento ou parcelamento? Fale diretamente com nosso suporte pelo WhatsApp!',
+};
+
 // Default Settings aligned with SAT LOJA visual identity
 export const DEFAULT_SETTINGS: StoreSettings = {
   storeName: 'SAT LOJA',
@@ -21,7 +111,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   whatsappNumber: '5582999999999',
   whatsappDefaultMessage: 'Olá! Vim pelo site da SAT LOJA e gostaria de tirar algumas dúvidas.',
   whatsappProductMessageTemplate: 'Olá! Tenho interesse neste produto da SAT LOJA:\n\n📦 *{NOME}*\n🏷️ Código: {SKU}\n💰 Preço: {PRECO}\n🔗 Link: {LINK}\n\nGostaria de saber mais informações e formas de entrega!',
-  whatsappCartMessageTemplate: '🛒 *NOVO PEDIDO — SAT LOJA*\n\n📋 *Itens do Pedido:*\n{ITENS}\n\n💵 *Total:* {TOTAL}\n\n👤 *Cliente:* {NOME}\n📱 *WhatsApp:* {TELEFONE}\n📍 *Endereço:* {ENDERECO}\n📝 *Observações:* {OBSERVACOES}\n\nPor favor, confirmem a disponibilidade para envio!',
+  whatsappCartMessageTemplate: '🛒 *NOVO PEDIDO — SAT LOJA*\n\n📋 *Itens do Pedido:*\n{ITENS}\n\n💵 *Total:* {TOTAL}\n💳 *Forma de Pagamento:* {PAGAMENTO}\n\n👤 *Cliente:* {NOME}\n📱 *WhatsApp:* {TELEFONE}\n📍 *Endereço:* {ENDERECO}\n📝 *Observações:* {OBSERVACOES}\n\nPor favor, confirmem a disponibilidade para envio!',
   enableWhatsappFloating: true,
   whatsappFloatingPosition: 'bottom-right',
   phone: '(82) 99999-9999',
@@ -42,6 +132,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   metaDescription: 'Loja Oficial SAT LOJA. Encontre os melhores smartphones, fones bluetooth, smartwatches e acessórios com garantia e atendimento rápido via WhatsApp.',
   enableStockControl: true,
   freeShippingThreshold: 299.00,
+  paymentSettings: DEFAULT_PAYMENT_SETTINGS,
 };
 
 export const DEFAULT_SECTIONS: SiteSectionsConfig = {
@@ -417,35 +508,53 @@ export const DEFAULT_ORDERS: Order[] = [
 class DatabaseService {
   // Products
   getProducts(): Product[] {
-    const data = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
+    const data = safeStorage.getItem(STORAGE_KEYS.PRODUCTS);
     if (!data) {
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(DEFAULT_PRODUCTS));
+      safeStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(DEFAULT_PRODUCTS));
       return DEFAULT_PRODUCTS;
     }
     try {
       const parsed = JSON.parse(data);
       if (!Array.isArray(parsed)) return DEFAULT_PRODUCTS;
-      return parsed.map((p) => ({
-        ...p,
-        id: String(p.id || 'prod-' + Math.random().toString(36).substr(2, 9)),
-        name: String(p.name || 'Produto'),
-        sku: String(p.sku || 'SKU-001'),
-        category: String(p.category || 'Geral'),
-        price: typeof p.price === 'number' && !isNaN(p.price) ? p.price : 0,
-        promotionalPrice: typeof p.promotionalPrice === 'number' && !isNaN(p.promotionalPrice) ? p.promotionalPrice : undefined,
-        stock: typeof p.stock === 'number' && !isNaN(p.stock) ? p.stock : 0,
-        description: String(p.description || ''),
-        detailedDescription: String(p.detailedDescription || p.description || ''),
-        isActive: p.isActive ?? true,
-        isFeatured: p.isFeatured ?? false,
-        isOffer: p.isOffer ?? false,
-        tags: Array.isArray(p.tags) ? p.tags : ['eletronicos'],
-        mainImage: String(p.mainImage || 'https://images.unsplash.com/photo-1592750475338-74b7b21085ab?q=80&w=800&auto=format&fit=crop'),
-        gallery: Array.isArray(p.gallery) ? p.gallery : (p.mainImage ? [p.mainImage] : []),
-        specs: p.specs && typeof p.specs === 'object' ? p.specs : {},
-        createdAt: p.createdAt || new Date().toISOString(),
-        updatedAt: p.updatedAt || new Date().toISOString(),
-      }));
+      return parsed.map((p) => {
+        const parsedPrice = typeof p.price === 'number' && !isNaN(p.price)
+          ? p.price
+          : parseFloat(String(p.price || 0).replace(',', '.')) || 0;
+
+        const parsedPromo = p.promotionalPrice !== undefined && p.promotionalPrice !== null && p.promotionalPrice !== ''
+          ? (typeof p.promotionalPrice === 'number' && !isNaN(p.promotionalPrice)
+              ? p.promotionalPrice
+              : parseFloat(String(p.promotionalPrice).replace(',', '.')) || undefined)
+          : undefined;
+
+        const rawStock = p.stock;
+        const parsedStock = typeof rawStock === 'number' && !isNaN(rawStock)
+          ? rawStock
+          : parseInt(String(rawStock || '15').replace(/\D/g, ''), 10);
+        const finalStock = isNaN(parsedStock) ? 15 : parsedStock;
+
+        return {
+          ...p,
+          id: String(p.id || 'prod-' + Math.random().toString(36).substr(2, 9)),
+          name: String(p.name || 'Produto'),
+          sku: String(p.sku || 'SKU-001'),
+          category: String(p.category || 'Geral'),
+          price: parsedPrice,
+          promotionalPrice: parsedPromo,
+          stock: finalStock,
+          description: String(p.description || ''),
+          detailedDescription: String(p.detailedDescription || p.description || ''),
+          isActive: p.isActive ?? true,
+          isFeatured: p.isFeatured ?? false,
+          isOffer: p.isOffer ?? false,
+          tags: Array.isArray(p.tags) ? p.tags : ['eletronicos'],
+          mainImage: String(p.mainImage || 'https://images.unsplash.com/photo-1592750475338-74b7b21085ab?q=80&w=800&auto=format&fit=crop'),
+          gallery: Array.isArray(p.gallery) ? p.gallery : (p.mainImage ? [p.mainImage] : []),
+          specs: p.specs && typeof p.specs === 'object' ? p.specs : {},
+          createdAt: p.createdAt || new Date().toISOString(),
+          updatedAt: p.updatedAt || new Date().toISOString(),
+        };
+      });
     } catch {
       return DEFAULT_PRODUCTS;
     }
@@ -453,11 +562,11 @@ class DatabaseService {
 
   saveProducts(products: Product[]): boolean {
     try {
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
+      safeStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
+      this.saveToCloud('products', products);
       return true;
     } catch (error) {
-      console.error('Erro ao persistir produtos no LocalStorage:', error);
-      // If quota exceeded, try removing base64 overhead or large caches if needed
+      console.error('Erro ao persistir produtos no Armazenamento Seguro:', error);
       return false;
     }
   }
@@ -516,9 +625,9 @@ class DatabaseService {
 
   // Categories
   getCategories(): Category[] {
-    const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+    const data = safeStorage.getItem(STORAGE_KEYS.CATEGORIES);
     if (!data) {
-      localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(DEFAULT_CATEGORIES));
+      safeStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(DEFAULT_CATEGORIES));
       return DEFAULT_CATEGORIES;
     }
     try {
@@ -540,7 +649,8 @@ class DatabaseService {
   }
 
   saveCategories(categories: Category[]): void {
-    localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+    safeStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+    this.saveToCloud('categories', categories);
   }
 
   addCategory(category: Omit<Category, 'id'>): Category {
@@ -571,9 +681,9 @@ class DatabaseService {
 
   // Banners
   getBanners(): Banner[] {
-    const data = localStorage.getItem(STORAGE_KEYS.BANNERS);
+    const data = safeStorage.getItem(STORAGE_KEYS.BANNERS);
     if (!data) {
-      localStorage.setItem(STORAGE_KEYS.BANNERS, JSON.stringify(DEFAULT_BANNERS));
+      safeStorage.setItem(STORAGE_KEYS.BANNERS, JSON.stringify(DEFAULT_BANNERS));
       return DEFAULT_BANNERS;
     }
     try {
@@ -596,7 +706,8 @@ class DatabaseService {
   }
 
   saveBanners(banners: Banner[]): void {
-    localStorage.setItem(STORAGE_KEYS.BANNERS, JSON.stringify(banners));
+    safeStorage.setItem(STORAGE_KEYS.BANNERS, JSON.stringify(banners));
+    this.saveToCloud('banners', banners);
   }
 
   addBanner(banner: Omit<Banner, 'id'>): Banner {
@@ -629,31 +740,37 @@ class DatabaseService {
 
   // Settings
   getSettings(): StoreSettings {
-    const data = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+    const data = safeStorage.getItem(STORAGE_KEYS.SETTINGS);
     if (!data) {
-      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
+      safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
       return DEFAULT_SETTINGS;
     }
     try {
       const parsed = JSON.parse(data);
-      return { ...DEFAULT_SETTINGS, ...parsed };
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        paymentSettings: {
+          ...DEFAULT_PAYMENT_SETTINGS,
+          ...(parsed.paymentSettings || {}),
+        },
+      };
     } catch {
       return DEFAULT_SETTINGS;
     }
   }
 
   saveSettings(settings: Partial<StoreSettings>): StoreSettings {
-    let current: StoreSettings = DEFAULT_SETTINGS;
-    const data = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    if (data) {
-      try {
-        current = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
-      } catch {
-        current = DEFAULT_SETTINGS;
-      }
-    }
-    const updated = { ...current, ...settings };
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
+    const current = this.getSettings();
+    const updated: StoreSettings = {
+      ...current,
+      ...settings,
+      paymentSettings: settings.paymentSettings
+        ? { ...(current.paymentSettings || DEFAULT_PAYMENT_SETTINGS), ...settings.paymentSettings }
+        : (current.paymentSettings || DEFAULT_PAYMENT_SETTINGS),
+    };
+    safeStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
+    this.saveToCloud('settings', updated);
     return updated;
   }
 
@@ -663,9 +780,9 @@ class DatabaseService {
 
   // Sections
   getSections(): SiteSectionsConfig {
-    const data = localStorage.getItem(STORAGE_KEYS.SECTIONS);
+    const data = safeStorage.getItem(STORAGE_KEYS.SECTIONS);
     if (!data) {
-      localStorage.setItem(STORAGE_KEYS.SECTIONS, JSON.stringify(DEFAULT_SECTIONS));
+      safeStorage.setItem(STORAGE_KEYS.SECTIONS, JSON.stringify(DEFAULT_SECTIONS));
       return DEFAULT_SECTIONS;
     }
     try {
@@ -677,14 +794,15 @@ class DatabaseService {
   }
 
   saveSections(sections: SiteSectionsConfig): void {
-    localStorage.setItem(STORAGE_KEYS.SECTIONS, JSON.stringify(sections));
+    safeStorage.setItem(STORAGE_KEYS.SECTIONS, JSON.stringify(sections));
+    this.saveToCloud('sections', sections);
   }
 
   // Orders
   getOrders(): Order[] {
-    const data = localStorage.getItem(STORAGE_KEYS.ORDERS);
+    const data = safeStorage.getItem(STORAGE_KEYS.ORDERS);
     if (!data) {
-      localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(DEFAULT_ORDERS));
+      safeStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(DEFAULT_ORDERS));
       return DEFAULT_ORDERS;
     }
     try {
@@ -692,48 +810,65 @@ class DatabaseService {
       if (!Array.isArray(parsed)) return DEFAULT_ORDERS;
       return parsed
         .filter((o) => o && typeof o === 'object')
-        .map((o) => ({
-          ...o,
-          id: String(o.id || 'PED-' + Math.floor(1000 + Math.random() * 9000)),
-          customerName: String(o.customerName || 'Cliente'),
-          customerPhone: String(o.customerPhone || ''),
-          customerAddress: String(o.customerAddress || ''),
-          customerNotes: String(o.customerNotes || ''),
-          items: Array.isArray(o.items)
-            ? o.items
-                .filter((item: any) => item && item.product && typeof item.product === 'object')
-                .map((item: any) => ({
-                  product: {
-                    ...item.product,
-                    id: String(item.product.id || 'prod-0'),
-                    name: String(item.product.name || 'Produto'),
-                    sku: String(item.product.sku || 'SKU-000'),
-                    category: String(item.product.category || 'Geral'),
-                    price: typeof item.product.price === 'number' && !isNaN(item.product.price) ? item.product.price : 0,
-                    promotionalPrice: typeof item.product.promotionalPrice === 'number' && !isNaN(item.product.promotionalPrice) ? item.product.promotionalPrice : undefined,
-                    stock: typeof item.product.stock === 'number' ? item.product.stock : 0,
-                    mainImage: String(item.product.mainImage || ''),
-                    tags: Array.isArray(item.product.tags) ? item.product.tags : [],
-                    gallery: Array.isArray(item.product.gallery) ? item.product.gallery : [],
-                    specs: item.product.specs && typeof item.product.specs === 'object' ? item.product.specs : {},
-                  },
-                  quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
-                }))
-            : [],
-          subtotal: typeof o.subtotal === 'number' && !isNaN(o.subtotal) ? o.subtotal : 0,
-          discount: typeof o.discount === 'number' && !isNaN(o.discount) ? o.discount : 0,
-          total: typeof o.total === 'number' && !isNaN(o.total) ? o.total : 0,
-          paymentMethod: o.paymentMethod || 'whatsapp',
-          status: o.status || 'pending',
-          createdAt: o.createdAt || new Date().toISOString(),
-        }));
+        .map((o) => {
+          const rawSubtotal = typeof o.subtotal === 'number' && !isNaN(o.subtotal) ? o.subtotal : parseFloat(String(o.subtotal || 0).replace(',', '.')) || 0;
+          const rawDiscount = typeof o.discount === 'number' && !isNaN(o.discount) ? o.discount : parseFloat(String(o.discount || 0).replace(',', '.')) || 0;
+          const rawTotal = typeof o.total === 'number' && !isNaN(o.total) ? o.total : parseFloat(String(o.total || 0).replace(',', '.')) || 0;
+
+          return {
+            ...o,
+            id: String(o.id || 'PED-' + Math.floor(1000 + Math.random() * 9000)),
+            customerName: String(o.customerName || 'Cliente'),
+            customerPhone: String(o.customerPhone || ''),
+            customerAddress: String(o.customerAddress || ''),
+            customerNotes: String(o.customerNotes || ''),
+            items: Array.isArray(o.items)
+              ? o.items
+                  .filter((item: any) => item && item.product && typeof item.product === 'object')
+                  .map((item: any) => {
+                    const rawP = item.product;
+                    const parsedPPrice = typeof rawP.price === 'number' && !isNaN(rawP.price) ? rawP.price : parseFloat(String(rawP.price || 0).replace(',', '.')) || 0;
+                    const parsedPromo = rawP.promotionalPrice !== undefined && rawP.promotionalPrice !== null && rawP.promotionalPrice !== ''
+                      ? (typeof rawP.promotionalPrice === 'number' && !isNaN(rawP.promotionalPrice) ? rawP.promotionalPrice : parseFloat(String(rawP.promotionalPrice).replace(',', '.')) || undefined)
+                      : undefined;
+                    const parsedStock = typeof rawP.stock === 'number' && !isNaN(rawP.stock) ? rawP.stock : parseInt(String(rawP.stock || 15), 10) || 15;
+                    const parsedQty = typeof item.quantity === 'number' && !isNaN(item.quantity) && item.quantity > 0 ? item.quantity : 1;
+
+                    return {
+                      product: {
+                        ...rawP,
+                        id: String(rawP.id || 'prod-0'),
+                        name: String(rawP.name || 'Produto'),
+                        sku: String(rawP.sku || 'SKU-000'),
+                        category: String(rawP.category || 'Geral'),
+                        price: parsedPPrice,
+                        promotionalPrice: parsedPromo,
+                        stock: parsedStock,
+                        mainImage: String(rawP.mainImage || ''),
+                        tags: Array.isArray(rawP.tags) ? rawP.tags : [],
+                        gallery: Array.isArray(rawP.gallery) ? rawP.gallery : [],
+                        specs: rawP.specs && typeof rawP.specs === 'object' ? rawP.specs : {},
+                      },
+                      quantity: parsedQty,
+                    };
+                  })
+              : [],
+            subtotal: rawSubtotal,
+            discount: rawDiscount,
+            total: rawTotal,
+            paymentMethod: o.paymentMethod || 'whatsapp',
+            status: o.status || 'pending',
+            createdAt: o.createdAt || new Date().toISOString(),
+          };
+        });
     } catch {
       return DEFAULT_ORDERS;
     }
   }
 
   saveOrders(orders: Order[]): void {
-    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+    safeStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+    this.saveToCloud('orders', orders);
   }
 
   addOrder(orderData: Omit<Order, 'id' | 'createdAt'>): Order {
@@ -776,46 +911,95 @@ class DatabaseService {
 
   // Cart
   getCart(): CartItem[] {
-    const data = localStorage.getItem(STORAGE_KEYS.CART);
+    const data = safeStorage.getItem(STORAGE_KEYS.CART);
     if (!data) return [];
     try {
       const parsed = JSON.parse(data);
       if (!Array.isArray(parsed)) return [];
       return parsed
-        .filter((item) => item && item.product && typeof item.product === 'object' && item.product.id)
-        .map((item) => ({
-          product: {
-            ...item.product,
-            id: String(item.product.id),
-            name: String(item.product.name || 'Produto'),
-            sku: String(item.product.sku || 'SKU-000'),
-            category: String(item.product.category || 'Geral'),
-            price: typeof item.product.price === 'number' && !isNaN(item.product.price) ? item.product.price : 0,
-            promotionalPrice: typeof item.product.promotionalPrice === 'number' && !isNaN(item.product.promotionalPrice) ? item.product.promotionalPrice : undefined,
-            stock: typeof item.product.stock === 'number' ? item.product.stock : 99,
-            mainImage: String(item.product.mainImage || ''),
-            tags: Array.isArray(item.product.tags) ? item.product.tags : [],
-            gallery: Array.isArray(item.product.gallery) ? item.product.gallery : [],
-            specs: item.product.specs && typeof item.product.specs === 'object' ? item.product.specs : {},
-          },
-          quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
-        }));
+        .filter((item) => item && item.product && typeof item.product === 'object' && item.product.id !== undefined && item.product.id !== null)
+        .map((item) => {
+          const rawPrice = item.product.price;
+          const parsedPrice = typeof rawPrice === 'number' && !isNaN(rawPrice)
+            ? rawPrice
+            : parseFloat(String(rawPrice || 0).replace(',', '.')) || 0;
+
+          const rawPromo = item.product.promotionalPrice;
+          const parsedPromo = rawPromo !== undefined && rawPromo !== null && rawPromo !== ''
+            ? (typeof rawPromo === 'number' && !isNaN(rawPromo)
+                ? rawPromo
+                : parseFloat(String(rawPromo).replace(',', '.')) || undefined)
+            : undefined;
+
+          const rawStock = item.product.stock;
+          const parsedStock = typeof rawStock === 'number' && !isNaN(rawStock)
+            ? rawStock
+            : parseInt(String(rawStock || 99), 10) || 99;
+
+          return {
+            product: {
+              ...item.product,
+              id: String(item.product.id),
+              name: String(item.product.name || 'Produto'),
+              sku: String(item.product.sku || 'SKU-000'),
+              category: String(item.product.category || 'Geral'),
+              price: parsedPrice,
+              promotionalPrice: parsedPromo,
+              stock: parsedStock,
+              mainImage: String(item.product.mainImage || ''),
+              tags: Array.isArray(item.product.tags) ? item.product.tags : [],
+              gallery: Array.isArray(item.product.gallery) ? item.product.gallery : [],
+              specs: item.product.specs && typeof item.product.specs === 'object' ? item.product.specs : {},
+            },
+            quantity: typeof item.quantity === 'number' && !isNaN(item.quantity) && item.quantity > 0 ? item.quantity : 1,
+          };
+        });
     } catch {
       return [];
     }
   }
 
   saveCart(cart: CartItem[]): void {
-    localStorage.setItem(STORAGE_KEYS.CART, JSON.stringify(cart));
+    safeStorage.setItem(STORAGE_KEYS.CART, JSON.stringify(cart));
   }
 
   addToCart(product: Product, quantity = 1): CartItem[] {
+    if (!product || product.id === undefined || product.id === null) return this.getCart();
     const cart = this.getCart();
-    const existingIndex = cart.findIndex((item) => item.product.id === product.id);
+    const prodId = String(product.id);
+    const existingIndex = cart.findIndex((item) => item && item.product && String(item.product.id) === prodId);
+    const validQty = Math.max(1, typeof quantity === 'number' && !isNaN(quantity) ? Math.floor(quantity) : 1);
+
+    const priceNum = typeof product.price === 'number' && !isNaN(product.price)
+      ? product.price
+      : parseFloat(String(product.price || 0).replace(',', '.')) || 0;
+
+    const promoNum = product.promotionalPrice !== undefined && product.promotionalPrice !== null && (product.promotionalPrice as unknown) !== ''
+      ? (typeof product.promotionalPrice === 'number' && !isNaN(product.promotionalPrice)
+          ? product.promotionalPrice
+          : parseFloat(String(product.promotionalPrice).replace(',', '.')) || undefined)
+      : undefined;
+
+    const cleanProduct: Product = {
+      ...product,
+      id: prodId,
+      name: String(product.name || 'Produto'),
+      sku: String(product.sku || 'SKU-000'),
+      category: String(product.category || 'Geral'),
+      price: priceNum,
+      promotionalPrice: promoNum,
+      stock: typeof product.stock === 'number' && !isNaN(product.stock) ? product.stock : 99,
+      mainImage: String(product.mainImage || ''),
+      tags: Array.isArray(product.tags) ? product.tags : [],
+      gallery: Array.isArray(product.gallery) ? product.gallery : [],
+      specs: product.specs && typeof product.specs === 'object' ? product.specs : {},
+    };
+
     if (existingIndex > -1) {
-      cart[existingIndex].quantity += quantity;
+      cart[existingIndex].quantity = (cart[existingIndex].quantity || 1) + validQty;
+      cart[existingIndex].product = cleanProduct;
     } else {
-      cart.push({ product, quantity });
+      cart.push({ product: cleanProduct, quantity: validQty });
     }
     this.saveCart(cart);
     return cart;
@@ -823,10 +1007,11 @@ class DatabaseService {
 
   updateCartItemQuantity(productId: string, quantity: number): CartItem[] {
     let cart = this.getCart();
+    const prodId = String(productId);
     if (quantity <= 0) {
-      cart = cart.filter((item) => item.product.id !== productId);
+      cart = cart.filter((item) => String(item.product.id) !== prodId);
     } else {
-      const index = cart.findIndex((item) => item.product.id === productId);
+      const index = cart.findIndex((item) => String(item.product.id) === prodId);
       if (index > -1) {
         cart[index].quantity = quantity;
       }
@@ -836,7 +1021,8 @@ class DatabaseService {
   }
 
   removeFromCart(productId: string): CartItem[] {
-    const cart = this.getCart().filter((item) => item.product.id !== productId);
+    const prodId = String(productId);
+    const cart = this.getCart().filter((item) => String(item.product.id) !== prodId);
     this.saveCart(cart);
     return cart;
   }
@@ -848,15 +1034,15 @@ class DatabaseService {
 
   // Admin Auth (demo/local storage session)
   isAdminAuthenticated(): boolean {
-    return localStorage.getItem(STORAGE_KEYS.ADMIN_AUTH) === 'true';
+    return safeStorage.getItem(STORAGE_KEYS.ADMIN_AUTH) === 'true';
   }
 
   setAdminAuthenticated(status: boolean): void {
-    localStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, status ? 'true' : 'false');
+    safeStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, status ? 'true' : 'false');
   }
 
   getAdminUser(): AdminUser {
-    const data = localStorage.getItem(STORAGE_KEYS.ADMIN_USER);
+    const data = safeStorage.getItem(STORAGE_KEYS.ADMIN_USER);
     if (!data) {
       const defaultAdmin: AdminUser = {
         username: 'admin',
@@ -873,7 +1059,7 @@ class DatabaseService {
   }
 
   saveAdminUser(user: AdminUser): void {
-    localStorage.setItem(STORAGE_KEYS.ADMIN_USER, JSON.stringify(user));
+    safeStorage.setItem(STORAGE_KEYS.ADMIN_USER, JSON.stringify(user));
   }
 
   // Full Backup Export / Restore
@@ -919,8 +1105,38 @@ class DatabaseService {
     }
   }
 
+  // Cloud Sync (Firestore)
+  async syncFromCloud(): Promise<void> {
+    try {
+      const collections = ['products', 'categories', 'banners', 'settings', 'sections', 'orders'] as const;
+      for (const col of collections) {
+        const docRef = doc(firestoreDb, 'store_data', col);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data && data.items) {
+            safeStorage.setItem(`sat_loja_${col}`, JSON.stringify(data.items));
+          } else if (data && data.value) {
+            safeStorage.setItem(`sat_loja_${col}`, JSON.stringify(data.value));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Sync from cloud fallback:', e);
+    }
+  }
+
+  private saveToCloud(collectionName: string, payload: any): void {
+    try {
+      const docRef = doc(firestoreDb, 'store_data', collectionName);
+      setDoc(docRef, Array.isArray(payload) ? { items: payload, updatedAt: new Date().toISOString() } : { value: payload, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+    } catch {
+      // ignore
+    }
+  }
+
   resetToDefault(): void {
-    localStorage.clear();
+    safeStorage.clear();
     this.saveProducts(DEFAULT_PRODUCTS);
     this.saveCategories(DEFAULT_CATEGORIES);
     this.saveBanners(DEFAULT_BANNERS);
@@ -935,3 +1151,8 @@ class DatabaseService {
 }
 
 export const db = new DatabaseService();
+
+// Trigger initial background cloud sync
+if (typeof window !== 'undefined') {
+  db.syncFromCloud().catch(() => {});
+}

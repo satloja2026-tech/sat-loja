@@ -348,7 +348,7 @@ export const AdminProducts: React.FC<AdminProductsProps> = ({
     }
 
     const parsedStock = parseInt(formData.stock.toString().replace(/\D/g, ''), 10);
-    const finalStock = isNaN(parsedStock) ? 0 : parsedStock;
+    const finalStock = isNaN(parsedStock) || !formData.stock.toString().trim() ? 15 : parsedStock;
 
     const tagsArray = formData.tags
       .split(',')

@@ -36,7 +36,9 @@ import { AdminBackup } from './AdminBackup';
 import { AdminWhatsApp } from './AdminWhatsApp';
 import { AdminAppearance } from './AdminAppearance';
 import { AdminSettings } from './AdminSettings';
+import { AdminPayments } from './AdminPayments';
 import { AdminUsers } from './AdminUsers';
+import { CreditCard as PaymentCardIcon } from 'lucide-react';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -76,6 +78,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     { id: 'products', label: 'Produtos', icon: Package, badge: products.length },
     { id: 'categories', label: 'Categorias', icon: Layers, badge: categories.length },
     { id: 'orders', label: 'Pedidos WhatsApp', icon: ShoppingBag, badge: orders.filter(o => o.status === 'pending').length || null, badgeColor: 'bg-amber-400 text-black' },
+    { id: 'payments', label: 'Formas de Pagamento', icon: PaymentCardIcon, badge: 'Pix/Cartão', badgeColor: 'bg-emerald-500/20 text-emerald-400' },
     { id: 'banners', label: 'Banners Iniciais', icon: ImageIcon, badge: banners.length },
     { id: 'logo', label: 'Logo & Marca', icon: Sparkles, badge: null },
     { id: 'images', label: 'Carregar Imagens', icon: UploadCloud, badge: null },
@@ -222,6 +225,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           {activeTab === 'orders' && (
             <AdminOrders
               orders={orders}
+              onRefresh={onRefresh}
+            />
+          )}
+
+          {activeTab === 'payments' && (
+            <AdminPayments
+              settings={settings}
               onRefresh={onRefresh}
             />
           )}

@@ -59,18 +59,27 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           text: `Confira ${product.name} na SAT LOJA por R$ ${currentPrice.toFixed(2)}`,
           url: window.location.href,
         });
-      } catch (err) {
+      } catch {
         // Ignored if cancelled
       }
     } else {
-      navigator.clipboard.writeText(window.location.href);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(window.location.href);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }
+      } catch {
+        // Fallback for iframe restrictions
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
     }
   };
 
   const handleIncrease = () => {
-    if (quantity < product.stock) {
+    const maxStock = product.stock && product.stock > 0 ? product.stock : 99;
+    if (quantity < maxStock) {
       setQuantity(q => q + 1);
     }
   };
@@ -185,28 +194,39 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               </h2>
 
               {/* Price box */}
-              <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800/90 mb-5">
-                {hasDiscount && (
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs text-zinc-400 line-through">
-                      De: R$ {product.price.toFixed(2).replace('.', ',')}
-                    </span>
-                    <span className="text-xs font-bold text-emerald-400">
-                      Economize R$ {(product.price - product.promotionalPrice!).toFixed(2).replace('.', ',')}
-                    </span>
+              {(() => {
+                const paymentCfg = settings?.paymentSettings;
+                const pixDiscount = paymentCfg?.enablePix && (paymentCfg?.pixDiscountPercent || 0) > 0 ? paymentCfg.pixDiscountPercent : 0;
+                const pixPrice = pixDiscount > 0 ? currentPrice * (1 - pixDiscount / 100) : currentPrice;
+
+                return (
+                  <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800/90 mb-5">
+                    {hasDiscount && (
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs text-zinc-400 line-through">
+                          De: R$ {product.price.toFixed(2).replace('.', ',')}
+                        </span>
+                        <span className="text-xs font-bold text-emerald-400">
+                          Economize R$ {(product.price - product.promotionalPrice!).toFixed(2).replace('.', ',')}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-amber-400">R$</span>
+                      <span className="text-3xl font-black text-amber-400 tracking-tight font-['Outfit']">
+                        {pixDiscount > 0 ? pixPrice.toFixed(2).replace('.', ',') : currentPrice.toFixed(2).replace('.', ',')}
+                      </span>
+                      {pixDiscount > 0 ? (
+                        <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                          à vista no Pix ({pixDiscount}% OFF)
+                        </span>
+                      ) : (
+                        <span className="text-xs text-zinc-400 font-medium">à vista</span>
+                      )}
+                    </div>
                   </div>
-                )}
-                <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-bold text-amber-400">R$</span>
-                  <span className="text-3xl font-black text-amber-400 tracking-tight font-['Outfit']">
-                    {currentPrice.toFixed(2).replace('.', ',')}
-                  </span>
-                  <span className="text-xs text-zinc-400 font-medium">no Pix ou Boleto</span>
-                </div>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Ou em até 12x de R$ {((currentPrice * 1.08) / 12).toFixed(2).replace('.', ',')} no cartão
-                </p>
-              </div>
+                );
+              })()}
 
               {/* Stock Status */}
               <div className="flex items-center gap-2 mb-5">
@@ -257,9 +277,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <span className="text-xs font-bold text-zinc-300 uppercase">Quantidade:</span>
                 <div className="flex items-center bg-zinc-950 border border-zinc-700 rounded-xl p-1">
                   <button
+                    type="button"
                     onClick={handleDecrease}
-                    disabled={quantity <= 1 || product.stock <= 0}
-                    className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-300 disabled:opacity-30"
+                    disabled={quantity <= 1}
+                    className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-300 disabled:opacity-30 cursor-pointer"
                   >
                     <Minus className="w-4 h-4" />
                   </button>
@@ -267,9 +288,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     {quantity}
                   </span>
                   <button
+                    type="button"
                     onClick={handleIncrease}
-                    disabled={quantity >= product.stock || product.stock <= 0}
-                    className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-300 disabled:opacity-30"
+                    disabled={product.stock > 0 ? quantity >= product.stock : quantity >= 99}
+                    className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-300 disabled:opacity-30 cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -280,9 +302,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               <div className="flex flex-col gap-2.5">
                 {/* Buy Button with direct WhatsApp */}
                 <button
+                  type="button"
                   onClick={() => onWhatsAppOrder(product, quantity)}
-                  disabled={product.stock <= 0}
-                  className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 rounded-xl text-sm uppercase tracking-wider shadow-lg shadow-emerald-600/20 transition-all hover:scale-102 active:scale-98 disabled:opacity-40 cursor-pointer"
+                  className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 rounded-xl text-sm uppercase tracking-wider shadow-lg shadow-emerald-600/20 transition-all hover:scale-102 active:scale-98 cursor-pointer"
                 >
                   <MessageCircle className="w-5 h-5" />
                   <span>FALAR NO WHATSAPP / COMPRAR AGORA</span>
@@ -290,9 +312,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
                 {/* Add to Cart */}
                 <button
-                  onClick={() => onAddToCart(product, quantity)}
-                  disabled={product.stock <= 0}
-                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-black font-extrabold py-3.5 rounded-xl text-sm uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all hover:scale-102 active:scale-98 disabled:opacity-40 cursor-pointer"
+                  type="button"
+                  onClick={() => {
+                    onAddToCart(product, quantity);
+                    onClose();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-black font-extrabold py-3.5 rounded-xl text-sm uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all hover:scale-102 active:scale-98 cursor-pointer"
                 >
                   <ShoppingCart className="w-5 h-5" />
                   <span>ADICIONAR AO CARRINHO (R$ {(currentPrice * quantity).toFixed(2).replace('.', ',')})</span>

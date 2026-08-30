@@ -76,20 +76,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onSuccess, onClose }) =>
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Digite a senha (padrão: admin)"
+                placeholder="Digite a senha de acesso"
                 className="w-full bg-zinc-950 border border-zinc-700 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
               />
               <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
-            </div>
-            <div className="flex justify-between items-center mt-1">
-              <span className="text-[10px] text-zinc-500">Dica: digite "admin"</span>
-              <button
-                type="button"
-                onClick={() => setPassword('admin')}
-                className="text-[10px] text-amber-400 hover:underline"
-              >
-                Preencher senha padrão
-              </button>
             </div>
           </div>
 

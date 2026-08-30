@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Anyone can read catalog data (products, categories, banners, settings, sections)
+    // Writing requires authentication or can be unrestricted for demo admin management
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

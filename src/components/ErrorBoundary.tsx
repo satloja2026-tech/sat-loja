@@ -32,10 +32,13 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   private handleResetToDefault = () => {
     try {
       db.resetToDefault();
+    } catch {
+      // ignore
+    }
+    try {
       window.location.reload();
     } catch {
-      localStorage.clear();
-      window.location.reload();
+      // ignore
     }
   };
 

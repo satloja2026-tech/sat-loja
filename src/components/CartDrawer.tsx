@@ -10,9 +10,17 @@ import {
   ShieldCheck,
   ArrowRight,
   Sparkles,
+  QrCode,
+  CreditCard,
+  Banknote,
+  FileText,
+  Link as LinkIcon,
+  Copy,
+  Check,
+  CheckCircle2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { CartItem, StoreSettings, Order } from '../types';
+import { CartItem, StoreSettings, Order, PaymentMethodKey } from '../types';
 import { db } from '../services/db';
 
 interface CartDrawerProps {
@@ -40,19 +48,94 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [customerNotes, setCustomerNotes] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodKey>(
+    (settings?.paymentSettings?.defaultPaymentMethod as PaymentMethodKey) || 'pix'
+  );
+  const [selectedInstallments, setSelectedInstallments] = useState<number>(1);
+  const [cashChangeNeeded, setCashChangeNeeded] = useState<string>('');
+  const [copiedPixKey, setCopiedPixKey] = useState(false);
   const [showCheckoutForm, setShowCheckoutForm] = useState(false);
   const [formError, setFormError] = useState('');
 
+  // Always show the items list first when opening the cart
+  React.useEffect(() => {
+    if (isOpen) {
+      setShowCheckoutForm(false);
+    }
+  }, [isOpen, cart.length]);
+
   if (!isOpen) return null;
 
+  const paymentCfg = settings?.paymentSettings;
+
   const subtotal = cart.reduce((acc, item) => {
-    const price = item.product.promotionalPrice || item.product.price;
-    return acc + price * item.quantity;
+    if (!item || !item.product) return acc;
+    const rawPrice = item.product.promotionalPrice && item.product.promotionalPrice > 0
+      ? item.product.promotionalPrice
+      : item.product.price;
+    const price = typeof rawPrice === 'number' && !isNaN(rawPrice) ? rawPrice : parseFloat(String(rawPrice || 0)) || 0;
+    const qty = typeof item.quantity === 'number' && !isNaN(item.quantity) && item.quantity > 0 ? item.quantity : 1;
+    return acc + price * qty;
   }, 0);
+
+  // Dynamic Discount based on selected payment method
+  let discount = 0;
+  let discountLabel = '';
+
+  if (paymentMethod === 'pix' && paymentCfg?.enablePix && (paymentCfg?.pixDiscountPercent || 0) > 0) {
+    discount = (subtotal * (paymentCfg.pixDiscountPercent || 0)) / 100;
+    discountLabel = `Desconto Pix (${paymentCfg.pixDiscountPercent}%)`;
+  } else if (paymentMethod === 'cash' && paymentCfg?.enableCash && (paymentCfg?.cashDiscountPercent || 0) > 0) {
+    discount = (subtotal * (paymentCfg.cashDiscountPercent || 0)) / 100;
+    discountLabel = `Desconto À Vista (${paymentCfg.cashDiscountPercent}%)`;
+  } else if (paymentMethod === 'boleto' && paymentCfg?.enableBoleto && (paymentCfg?.boletoDiscountPercent || 0) > 0) {
+    discount = (subtotal * (paymentCfg.boletoDiscountPercent || 0)) / 100;
+    discountLabel = `Desconto Boleto (${paymentCfg.boletoDiscountPercent}%)`;
+  }
+
+  const finalTotal = Math.max(0, subtotal - discount);
 
   const freeShippingThreshold = settings.freeShippingThreshold || 299;
   const remainingForFreeShipping = Math.max(0, freeShippingThreshold - subtotal);
   const shippingProgress = Math.min(100, (subtotal / freeShippingThreshold) * 100);
+
+  const copyPixKey = async () => {
+    if (paymentCfg?.pixKey) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(paymentCfg.pixKey);
+        }
+      } catch {
+        // Fallback for iframe environment
+      }
+      setCopiedPixKey(true);
+      setTimeout(() => setCopiedPixKey(false), 2500);
+    }
+  };
+
+  const getPaymentDescriptionForWhatsApp = () => {
+    switch (paymentMethod) {
+      case 'pix': {
+        const discText = discount > 0 ? ` (com ${paymentCfg?.pixDiscountPercent}% de desconto aplicado)` : '';
+        return `⚡ Pix Instantâneo${discText}`;
+      }
+      case 'credit_card': {
+        const instAmount = (subtotal / selectedInstallments).toFixed(2).replace('.', ',');
+        const isFree = selectedInstallments <= (paymentCfg?.creditCardInterestFreeInstallments || 1);
+        return `💳 Cartão de Crédito (${selectedInstallments}x de R$ ${instAmount}${isFree ? ' sem juros' : ''})`;
+      }
+      case 'debit_card':
+        return `💳 Cartão de Débito (Maquininha na entrega)`;
+      case 'cash':
+        return `💵 Dinheiro / À Vista ${cashChangeNeeded ? `(Troco para: R$ ${cashChangeNeeded})` : '(Valor exato)'}`;
+      case 'boleto':
+        return `📄 Boleto Bancário`;
+      case 'payment_link':
+        return `🔗 Link de Pagamento Online`;
+      default:
+        return `📱 A Combinar no WhatsApp`;
+    }
+  };
 
   const handleCheckoutWhatsApp = () => {
     if (cart.length === 0) return;
@@ -77,27 +160,35 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       })
       .join('\n\n');
 
-    const totalFormatted = `R$ ${subtotal.toFixed(2).replace('.', ',')}`;
+    const paymentText = getPaymentDescriptionForWhatsApp();
+    const subtotalFormatted = `R$ ${subtotal.toFixed(2).replace('.', ',')}`;
+    const discountFormatted = discount > 0 ? `\n🎁 *${discountLabel}:* -R$ ${discount.toFixed(2).replace('.', ',')}` : '';
+    const totalFormatted = `R$ ${finalTotal.toFixed(2).replace('.', ',')}`;
 
-    // Custom template interpolation
+    // Custom template interpolation or default template
     let message = settings.whatsappCartMessageTemplate ||
 `🛒 *NOVO PEDIDO — SAT LOJA*
 
 📋 *Itens do Pedido:*
 {ITENS}
 
-💵 *Total:* {TOTAL}
+💰 *Subtotal:* {SUBTOTAL}{DESCONTO}
+💵 *Total a Pagar:* {TOTAL}
+💳 *Forma de Pagamento:* {PAGAMENTO}
 
 👤 *Cliente:* {NOME}
 📱 *WhatsApp:* {TELEFONE}
 📍 *Endereço:* {ENDERECO}
 📝 *Observações:* {OBSERVACOES}
 
-Por favor, confirmem a disponibilidade e dados para pagamento!`;
+Por favor, confirmem a disponibilidade e dados para prosseguirmos!`;
 
     message = message
       .replace('{ITENS}', itemsFormatted)
+      .replace('{SUBTOTAL}', subtotalFormatted)
+      .replace('{DESCONTO}', discountFormatted)
       .replace('{TOTAL}', totalFormatted)
+      .replace('{PAGAMENTO}', paymentText)
       .replace('{NOME}', customerName)
       .replace('{TELEFONE}', customerPhone)
       .replace('{ENDERECO}', customerAddress)
@@ -108,12 +199,12 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
       customerName,
       customerPhone,
       customerAddress,
-      customerNotes,
+      customerNotes: customerNotes + (cashChangeNeeded ? ` | Troco para: R$ ${cashChangeNeeded}` : ''),
       items: [...cart],
       subtotal,
-      discount: 0,
-      total: subtotal,
-      paymentMethod: 'whatsapp',
+      discount,
+      total: finalTotal,
+      paymentMethod,
       status: 'pending',
     });
 
@@ -130,7 +221,11 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
 
     // Open WhatsApp
     const waUrl = `https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, '_blank');
+    try {
+      window.open(waUrl, '_blank');
+    } catch {
+      window.location.href = waUrl;
+    }
   };
 
   return (
@@ -199,11 +294,11 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
                 </button>
               </div>
             ) : showCheckoutForm ? (
-              /* Customer Details Checkout Form */
+              /* Customer Details & Payment Checkout Form */
               <div className="space-y-4 animate-in fade-in duration-200">
                 <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <span>📋 Dados para Envio & WhatsApp</span>
+                    <span>📋 Dados para Envio & Pagamento</span>
                   </h3>
                   <button
                     onClick={() => setShowCheckoutForm(false)}
@@ -219,6 +314,7 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
                   </div>
                 )}
 
+                {/* Personal Information */}
                 <div className="space-y-3 text-xs">
                   <div>
                     <label className="block text-zinc-300 font-semibold mb-1">Seu Nome Completo *</label>
@@ -254,7 +350,7 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
                   </div>
 
                   <div>
-                    <label className="block text-zinc-400 font-semibold mb-1">Observações ou Ponto de Referência (Opcional)</label>
+                    <label className="block text-zinc-400 font-semibold mb-1">Observações / Ponto de Referência (Opcional)</label>
                     <input
                       type="text"
                       value={customerNotes}
@@ -265,9 +361,220 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
                   </div>
                 </div>
 
+                {/* Forma de Pagamento Selection */}
+                <div className="pt-3 border-t border-zinc-800 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider">
+                      Escolha a Forma de Pagamento
+                    </label>
+                    {discount > 0 && (
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                        {discountLabel}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {/* Pix Option */}
+                    {paymentCfg?.enablePix !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('pix')}
+                        className={`p-3 rounded-xl border flex flex-col items-start gap-1 text-left transition-all ${
+                          paymentMethod === 'pix'
+                            ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/50'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-bold flex items-center gap-1.5">
+                            <QrCode className="w-4 h-4 text-emerald-400" />
+                            Pix
+                          </span>
+                          {(paymentCfg?.pixDiscountPercent || 0) > 0 && (
+                            <span className="text-[9px] font-extrabold bg-emerald-500 text-black px-1.5 py-0.2 rounded">
+                              {paymentCfg?.pixDiscountPercent}% OFF
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-zinc-400">Aprovação imediata</span>
+                      </button>
+                    )}
+
+                    {/* Credit Card Option */}
+                    {paymentCfg?.enableCreditCard !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('credit_card')}
+                        className={`p-3 rounded-xl border flex flex-col items-start gap-1 text-left transition-all ${
+                          paymentMethod === 'credit_card'
+                            ? 'bg-amber-400/15 border-amber-400 text-amber-300 ring-1 ring-amber-400/50'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-bold flex items-center gap-1.5">
+                            <CreditCard className="w-4 h-4 text-amber-400" />
+                            Cartão Crédito
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-zinc-400">
+                          Até {paymentCfg?.creditCardMaxInstallments || 12}x parcelado
+                        </span>
+                      </button>
+                    )}
+
+                    {/* Debit Card Option */}
+                    {paymentCfg?.enableDebitCard && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('debit_card')}
+                        className={`p-3 rounded-xl border flex flex-col items-start gap-1 text-left transition-all ${
+                          paymentMethod === 'debit_card'
+                            ? 'bg-amber-400/15 border-amber-400 text-amber-300 ring-1 ring-amber-400/50'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
+                        }`}
+                      >
+                        <span className="font-bold flex items-center gap-1.5">
+                          <CreditCard className="w-4 h-4 text-blue-400" />
+                          Cartão Débito
+                        </span>
+                        <span className="text-[10px] text-zinc-400">Maquininha entrega</span>
+                      </button>
+                    )}
+
+                    {/* Cash Option */}
+                    {paymentCfg?.enableCash && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('cash')}
+                        className={`p-3 rounded-xl border flex flex-col items-start gap-1 text-left transition-all ${
+                          paymentMethod === 'cash'
+                            ? 'bg-amber-400/15 border-amber-400 text-amber-300 ring-1 ring-amber-400/50'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-bold flex items-center gap-1.5">
+                            <Banknote className="w-4 h-4 text-emerald-400" />
+                            Dinheiro
+                          </span>
+                          {(paymentCfg?.cashDiscountPercent || 0) > 0 && (
+                            <span className="text-[9px] font-extrabold bg-emerald-500 text-black px-1.5 py-0.2 rounded">
+                              {paymentCfg?.cashDiscountPercent}% OFF
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-zinc-400">À vista na entrega</span>
+                      </button>
+                    )}
+
+                    {/* Boleto Option */}
+                    {paymentCfg?.enableBoleto && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('boleto')}
+                        className={`p-3 rounded-xl border flex flex-col items-start gap-1 text-left transition-all ${
+                          paymentMethod === 'boleto'
+                            ? 'bg-amber-400/15 border-amber-400 text-amber-300 ring-1 ring-amber-400/50'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
+                        }`}
+                      >
+                        <span className="font-bold flex items-center gap-1.5">
+                          <FileText className="w-4 h-4 text-purple-400" />
+                          Boleto
+                        </span>
+                        <span className="text-[10px] text-zinc-400">Compensação 1-2 dias</span>
+                      </button>
+                    )}
+
+                    {/* Payment Link Option */}
+                    {paymentCfg?.enablePaymentLink && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('payment_link')}
+                        className={`p-3 rounded-xl border flex flex-col items-start gap-1 text-left transition-all ${
+                          paymentMethod === 'payment_link'
+                            ? 'bg-amber-400/15 border-amber-400 text-amber-300 ring-1 ring-amber-400/50'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
+                        }`}
+                      >
+                        <span className="font-bold flex items-center gap-1.5">
+                          <LinkIcon className="w-4 h-4 text-indigo-400" />
+                          Link Online
+                        </span>
+                        <span className="text-[10px] text-zinc-400">Pague pelo celular</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Payment Method Details / Context Box */}
+                  {paymentMethod === 'pix' && (
+                    <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs space-y-2">
+                      <div className="flex items-center justify-between text-emerald-300 font-bold">
+                        <span>Chave Pix da SAT LOJA:</span>
+                        <span className="text-[10px] text-zinc-400 uppercase">({paymentCfg?.pixKeyType || 'CNPJ'})</span>
+                      </div>
+                      <div className="flex items-center justify-between bg-zinc-950 border border-emerald-500/30 rounded-lg p-2 font-mono text-white text-xs">
+                        <span className="truncate mr-2">{paymentCfg?.pixKey || settings.phone}</span>
+                        <button
+                          type="button"
+                          onClick={copyPixKey}
+                          className="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-[10px] flex items-center gap-1 shrink-0"
+                        >
+                          {copiedPixKey ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedPixKey ? 'Copiado!' : 'Copiar'}</span>
+                        </button>
+                      </div>
+                      {paymentCfg?.pixBeneficiary && (
+                        <p className="text-[10px] text-zinc-400">
+                          Beneficiário: <strong className="text-zinc-200">{paymentCfg.pixBeneficiary}</strong> {paymentCfg?.pixCity && `(${paymentCfg.pixCity})`}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {paymentMethod === 'credit_card' && (
+                    <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs space-y-2">
+                      <label className="block text-zinc-300 font-semibold">Selecione o Parcelamento Desejado:</label>
+                      <select
+                        value={selectedInstallments}
+                        onChange={(e) => setSelectedInstallments(parseInt(e.target.value, 10))}
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-white font-medium focus:outline-none focus:border-amber-400 text-xs"
+                      >
+                        {Array.from({ length: paymentCfg?.creditCardMaxInstallments || 12 }, (_, i) => i + 1).map((num) => {
+                          const isInterestFree = num <= (paymentCfg?.creditCardInterestFreeInstallments || 3);
+                          const instVal = subtotal / num;
+                          return (
+                            <option key={num} value={num}>
+                              {num}x de R$ {instVal.toFixed(2).replace('.', ',')} {isInterestFree ? '(sem juros)' : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <p className="text-[10px] text-zinc-400">
+                        {paymentCfg?.creditCardInstructions || 'Aceitamos as principais bandeiras (Visa, Mastercard, Elo, Hipercard, Amex).'}
+                      </p>
+                    </div>
+                  )}
+
+                  {paymentMethod === 'cash' && (
+                    <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs space-y-2">
+                      <label className="block text-zinc-300 font-semibold">Precisa de troco? (Opcional)</label>
+                      <input
+                        type="text"
+                        value={cashChangeNeeded}
+                        onChange={(e) => setCashChangeNeeded(e.target.value)}
+                        placeholder="Ex: Troco para R$ 100,00 ou R$ 200,00"
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-amber-400 text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
+
                 <div className="p-3 rounded-xl bg-amber-400/10 border border-amber-400/20 text-[11px] text-zinc-300 flex items-start gap-2">
                   <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <span>Ao clicar em finalizar, abriremos o WhatsApp com seu pedido preenchido pronto para envio imediato para nossa equipe SAT LOJA.</span>
+                  <span>Ao clicar em enviar pedido, abriremos o WhatsApp com todos os detalhes prontos para confirmação imediata.</span>
                 </div>
               </div>
             ) : (
@@ -286,7 +593,11 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
 
                 <div className="divide-y divide-zinc-800/80">
                   {cart.map((item) => {
-                    const price = item.product.promotionalPrice || item.product.price;
+                    const rawPrice = item.product.promotionalPrice && item.product.promotionalPrice > 0
+                      ? item.product.promotionalPrice
+                      : item.product.price;
+                    const price = typeof rawPrice === 'number' && !isNaN(rawPrice) ? rawPrice : parseFloat(String(rawPrice || 0)) || 0;
+                    const qty = typeof item.quantity === 'number' && !isNaN(item.quantity) && item.quantity > 0 ? item.quantity : 1;
                     return (
                       <div key={item.product.id} className="py-3 flex gap-3 group">
                         {/* Thumbnail */}
@@ -335,9 +646,9 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
                             {/* Price */}
                             <div className="text-right">
                               <span className="text-xs font-bold text-amber-400">
-                                R$ {(price * item.quantity).toFixed(2).replace('.', ',')}
+                                R$ {(price * qty).toFixed(2).replace('.', ',')}
                               </span>
-                              {item.quantity > 1 && (
+                              {qty > 1 && (
                                 <span className="text-[10px] text-zinc-400 block">
                                   (R$ {price.toFixed(2).replace('.', ',')} un.)
                                 </span>
@@ -353,7 +664,7 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
             )}
           </div>
 
-          {/* Drawer Footer with Subtotal and WhatsApp CTA */}
+          {/* Drawer Footer with Subtotal, Discount and WhatsApp CTA */}
           {cart.length > 0 && (
             <div className="p-5 border-t border-zinc-800 bg-zinc-950 space-y-4">
               <div className="space-y-1.5 text-xs">
@@ -361,6 +672,12 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
                   <span>Subtotal</span>
                   <span>R$ {subtotal.toFixed(2).replace('.', ',')}</span>
                 </div>
+                {discount > 0 && (
+                  <div className="flex justify-between text-emerald-400 font-semibold">
+                    <span>{discountLabel}</span>
+                    <span>- R$ {discount.toFixed(2).replace('.', ',')}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-zinc-400">
                   <span>Frete</span>
                   <span className={remainingForFreeShipping === 0 ? 'text-emerald-400 font-bold' : 'text-zinc-300'}>
@@ -368,9 +685,9 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`;
                   </span>
                 </div>
                 <div className="flex justify-between text-base font-black text-white pt-2 border-t border-zinc-800">
-                  <span>Total Estimado</span>
+                  <span>Total Final</span>
                   <span className="text-amber-400 text-lg font-['Outfit']">
-                    R$ {subtotal.toFixed(2).replace('.', ',')}
+                    R$ {finalTotal.toFixed(2).replace('.', ',')}
                   </span>
                 </div>
               </div>

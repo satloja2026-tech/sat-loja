@@ -69,23 +69,24 @@ export const App: React.FC = () => {
   // Cart Operations
   const handleAddToCart = (product: Product, quantity = 1) => {
     const updated = db.addToCart(product, quantity);
-    setCart(updated);
+    setCart([...updated]);
     setIsCartOpen(true);
+    setSelectedProduct(null);
   };
 
   const handleUpdateQuantity = (productId: string, quantity: number) => {
     const updated = db.updateCartItemQuantity(productId, quantity);
-    setCart(updated);
+    setCart([...updated]);
   };
 
   const handleRemoveFromCart = (productId: string) => {
     const updated = db.removeFromCart(productId);
-    setCart(updated);
+    setCart([...updated]);
   };
 
   const handleClearCart = () => {
     const updated = db.clearCart();
-    setCart(updated);
+    setCart([...updated]);
   };
 
   // Direct WhatsApp Purchase for Single Product
@@ -104,7 +105,11 @@ export const App: React.FC = () => {
       .replace('{LINK}', productUrl);
 
     const waUrl = `https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, '_blank');
+    try {
+      window.open(waUrl, '_blank');
+    } catch {
+      window.location.href = waUrl;
+    }
   };
 
   // Admin Access Flow
@@ -207,7 +212,7 @@ export const App: React.FC = () => {
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-white uppercase tracking-wider">Pagamento Facilitado</h4>
-                    <p className="text-[11px] text-zinc-400">Pix com desconto ou até 12x no cartão</p>
+                    <p className="text-[11px] text-zinc-400">Pix com desconto e aprovação imediata</p>
                   </div>
                 </div>
               </div>

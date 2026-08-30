@@ -66,7 +66,11 @@ Por favor, confirmem a disponibilidade e dados para pagamento!`
   const handleTestWhatsApp = () => {
     const cleanNumber = whatsappNumber.replace(/\D/g, '');
     const url = `https://wa.me/${cleanNumber}?text=${encodeURIComponent(defaultMessage)}`;
-    window.open(url, '_blank');
+    try {
+      window.open(url, '_blank');
+    } catch {
+      window.location.href = url;
+    }
   };
 
   return (

@@ -444,7 +444,24 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ orders, onRefresh }) =
                 {selectedOrder.paymentMethod && (
                   <div className="flex items-center gap-2 text-zinc-400 text-[11px] pt-1 border-t border-zinc-900">
                     <CreditCard className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>Pagamento: <strong className="text-zinc-200 capitalize">{selectedOrder.paymentMethod}</strong></span>
+                    <span>
+                      Pagamento:{' '}
+                      <strong className="text-amber-300 font-semibold">
+                        {selectedOrder.paymentMethod === 'pix'
+                          ? '⚡ Pix Instantâneo'
+                          : selectedOrder.paymentMethod === 'credit_card' || selectedOrder.paymentMethod === 'card'
+                          ? '💳 Cartão de Crédito'
+                          : selectedOrder.paymentMethod === 'debit_card'
+                          ? '💳 Cartão de Débito'
+                          : selectedOrder.paymentMethod === 'cash' || selectedOrder.paymentMethod === 'money'
+                          ? '💵 Dinheiro / Espécie'
+                          : selectedOrder.paymentMethod === 'boleto'
+                          ? '📄 Boleto Bancário'
+                          : selectedOrder.paymentMethod === 'payment_link'
+                          ? '🔗 Link de Pagamento'
+                          : '📱 WhatsApp / A Combinar'}
+                      </strong>
+                    </span>
                   </div>
                 )}
                 {selectedOrder.customerNotes && (
@@ -667,12 +684,15 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ orders, onRefresh }) =
                     <select
                       value={editingOrder.paymentMethod}
                       onChange={(e) => setEditingOrder({ ...editingOrder, paymentMethod: e.target.value as any })}
-                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-400 cursor-pointer"
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-400 cursor-pointer text-xs font-semibold"
                     >
-                      <option value="whatsapp">WhatsApp / A Combinar</option>
-                      <option value="pix">Pix</option>
-                      <option value="card">Cartão de Crédito</option>
-                      <option value="money">Dinheiro / À Vista</option>
+                      <option value="pix">⚡ Pix Instantâneo</option>
+                      <option value="credit_card">💳 Cartão de Crédito</option>
+                      <option value="debit_card">💳 Cartão de Débito</option>
+                      <option value="cash">💵 Dinheiro / Espécie</option>
+                      <option value="boleto">📄 Boleto Bancário</option>
+                      <option value="payment_link">🔗 Link de Pagamento</option>
+                      <option value="whatsapp">📱 WhatsApp / A Combinar</option>
                     </select>
                   </div>
 

@@ -24,6 +24,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onAddToCart,
   onDirectWhatsApp,
 }) => {
+  const [isJustAdded, setIsJustAdded] = React.useState(false);
   const hasDiscount = product.promotionalPrice && product.promotionalPrice < product.price;
   const discountPercent = hasDiscount
     ? Math.round(((product.price - (product.promotionalPrice || product.price)) / product.price) * 100)
@@ -31,6 +32,18 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   const currentPrice = hasDiscount ? product.promotionalPrice! : product.price;
   const isOutOfStock = product.stock <= 0;
+
+  const paymentCfg = settings?.paymentSettings;
+  const pixDiscount = paymentCfg?.enablePix && (paymentCfg?.pixDiscountPercent || 0) > 0 ? paymentCfg.pixDiscountPercent : 0;
+  const pixPrice = pixDiscount > 0 ? currentPrice * (1 - pixDiscount / 100) : currentPrice;
+
+  const handleAdd = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsJustAdded(true);
+    onAddToCart(product);
+    setTimeout(() => setIsJustAdded(false), 1500);
+  };
 
   return (
     <div
@@ -126,16 +139,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 R$ {product.price.toFixed(2).replace('.', ',')}
               </span>
             )}
-            <div className="flex items-baseline gap-1.5">
+            <div className="flex items-baseline gap-1.5 flex-wrap">
               <span className="text-xs font-bold text-zinc-400">R$</span>
               <span className="text-xl font-black text-amber-400 tracking-tight font-['Outfit']">
-                {currentPrice.toFixed(2).replace('.', ',')}
+                {pixDiscount > 0 ? pixPrice.toFixed(2).replace('.', ',') : currentPrice.toFixed(2).replace('.', ',')}
               </span>
-              <span className="text-[10px] text-zinc-400 font-medium">à vista</span>
+              {pixDiscount > 0 ? (
+                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                  no Pix ({pixDiscount}% OFF)
+                </span>
+              ) : (
+                <span className="text-[10px] text-zinc-400 font-medium">à vista</span>
+              )}
             </div>
-            <span className="text-[10px] text-zinc-400 block mt-0.5">
-              ou até 12x no cartão
-            </span>
           </div>
 
           {/* Action Buttons Grid */}
@@ -153,13 +169,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
             {/* Add to Cart button */}
             <button
-              onClick={() => onAddToCart(product)}
-              disabled={isOutOfStock}
-              className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black py-2 px-2.5 rounded-xl text-xs font-extrabold shadow-md shadow-amber-500/15 transition-all hover:scale-102 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              type="button"
+              onClick={handleAdd}
+              className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-extrabold shadow-md transition-all hover:scale-102 active:scale-95 cursor-pointer ${
+                isJustAdded
+                  ? 'bg-emerald-500 text-black shadow-emerald-500/25'
+                  : 'bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black shadow-amber-500/15'
+              }`}
               title="Adicionar ao Carrinho"
             >
-              <ShoppingCart className="w-3.5 h-3.5" />
-              <span>Adicionar</span>
+              {isJustAdded ? (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Adicionado!</span>
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="w-3.5 h-3.5" />
+                  <span>Adicionar</span>
+                </>
+              )}
             </button>
           </div>
         </div>

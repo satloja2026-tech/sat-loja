@@ -51,6 +51,54 @@ export interface CartItem {
   quantity: number;
 }
 
+export type PaymentMethodKey = 'whatsapp' | 'pix' | 'credit_card' | 'debit_card' | 'cash' | 'boleto' | 'payment_link' | 'card' | 'money';
+
+export interface PaymentSettings {
+  // Pix
+  enablePix: boolean;
+  pixKey: string;
+  pixKeyType: 'cpf' | 'cnpj' | 'email' | 'phone' | 'random';
+  pixBeneficiary: string;
+  pixCity?: string;
+  pixDiscountPercent: number; // Ex: 5% ou 10%
+  pixInstructions: string;
+  pixQrCodeUrl?: string;
+
+  // Cartão de Crédito
+  enableCreditCard: boolean;
+  creditCardMaxInstallments: number; // Ex: 12
+  creditCardInterestFreeInstallments: number; // Ex: 3 ou 6 (sem juros)
+  creditCardInterestRate: number; // Ex: 1.99 (% a.m. se parcelar além das sem juros)
+  creditCardMachineOnDelivery: boolean; // Levar maquininha na entrega
+  creditCardInstructions: string;
+
+  // Cartão de Débito
+  enableDebitCard: boolean;
+  debitCardMachineOnDelivery: boolean;
+  debitCardInstructions: string;
+
+  // Dinheiro / À Vista
+  enableCash: boolean;
+  cashDiscountPercent: number;
+  cashInstructions: string;
+
+  // Boleto Bancário
+  enableBoleto: boolean;
+  boletoDiscountPercent: number;
+  boletoInstructions: string;
+
+  // Link de Pagamento Online
+  enablePaymentLink: boolean;
+  paymentLinkName: string;
+  paymentLinkUrl: string;
+  paymentLinkInstructions: string;
+
+  // Opções Gerais
+  defaultPaymentMethod: PaymentMethodKey;
+  showPaymentBadgesOnCards: boolean;
+  customPaymentNotes?: string;
+}
+
 export interface Order {
   id: string;
   customerName: string;
@@ -61,7 +109,13 @@ export interface Order {
   subtotal: number;
   discount: number;
   total: number;
-  paymentMethod: 'whatsapp' | 'pix' | 'card' | 'money';
+  paymentMethod: PaymentMethodKey | string;
+  paymentDetails?: {
+    methodName: string;
+    installments?: number;
+    installmentValue?: number;
+    changeFor?: number;
+  };
   status: OrderStatus;
   createdAt: string;
 }
@@ -100,6 +154,7 @@ export interface StoreSettings {
   freeShippingThreshold?: number;
   showTopBar?: boolean;
   topBarText?: string;
+  paymentSettings?: PaymentSettings;
   sectionsConfig?: SiteSectionsConfig;
 }
 

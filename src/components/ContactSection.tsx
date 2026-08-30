@@ -27,7 +27,11 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ settings }) => {
 
     const formattedMessage = `Olá SAT LOJA!\n\n👤 *Nome:* ${name}\n📌 *Assunto:* ${subject}\n\n💬 *Mensagem:*\n${message}`;
     const waUrl = `https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(formattedMessage)}`;
-    window.open(waUrl, '_blank');
+    try {
+      window.open(waUrl, '_blank');
+    } catch {
+      window.location.href = waUrl;
+    }
 
     setSent(true);
     setName('');
